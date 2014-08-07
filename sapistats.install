@@ -62,7 +62,7 @@ function sapistats_schema() {
       'value' => array(
         'description' => 'Search term value',
         'type' => 'varchar',
-        'length' => 56,
+        'length' => 255,
         'not null' => TRUE,
         'default' => '',
       ),

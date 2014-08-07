@@ -1,0 +1,103 @@
+<?php
+/**
+ * @file
+ * Search API Statistics installation script
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function sapistats_schema() {
+  $schema['sapistats'] = array(
+    'description' => 'Stores search usage statistics',
+    'fields' => array(
+      'id' => array(
+        'description' => 'Auto-incremented primary int key.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'timestamp' => array(
+        'description' => 'The Unix timestamp when the query was issued.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'sid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Search id',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The id of the user performed the search.',
+      ),
+      'field' => array(
+        'description' => 'Field for search in',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'sindex' => array(
+        'description' => 'Search index name',
+        'type' => 'varchar',
+        'length' => 24,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'type' => array(
+        'description' => 'Search term type',
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => FALSE,
+        'default' => '',
+      ),
+      'value' => array(
+        'description' => 'Search term value',
+        'type' => 'varchar',
+        'length' => 56,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'ip' => array(
+        'description' => 'IP-address that query came from',
+        'type' => 'varchar',
+        'length' => 25,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'search_timestamp_id' => array('timestamp', 'sid', 'value'),
+      'uid' => array('uid'),
+    ),
+    'primary key' => array('id'),
+  );
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function sapistats_install() {
+  $settings = array();
+  $settings['blacklist']['searchids'] = array('search_api_autocomplete');
+  $settings['enabled'] = TRUE;
+  $settings['sapistats_flush_log_timer'] = 15552000;
+  //variable_set('sapistats', $settings);
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function sapistats_uninstall() {
+  variable_del('sapistats_enabled');
+  variable_del('sapistats_flush_log_timer');
+}

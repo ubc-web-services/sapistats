@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the ubc_sapistats_views feature.
+ */
+
+include_once 'ubc_sapistats_views.features.inc';

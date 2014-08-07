@@ -1,0 +1,8 @@
+name = "Search API statistics"
+description = "Shows usage statistics for Search API"
+core = "7.x"
+files[] = sapistats.entity.inc
+package = "Search"
+dependencies[] = entity
+dependencies[] = views
+configure = admin/config/search/sapistats

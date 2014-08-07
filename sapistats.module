@@ -1,0 +1,359 @@
+<?php
+
+/**
+ * @file
+ * Search API Statistics Module
+ */
+
+/**
+ * Implements hook_help().
+ */
+function sapistats_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#sapistats":
+      return '<p>' .  t("Gathers, stores and synthesises statistics on usage of Search API searches") . '</p>';
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function sapistats_menu() {
+  $pre = 'admin/config/search/sapistats';
+  $items[$pre] = array(
+    'title' => 'Search API Statistics',
+    'description' => 'Create and configure search engines.',
+    'page callback' => 'drupal_get_form',
+    'file' => 'sapistats.admin.inc',
+    'page arguments' => array('sapistats_admin'),
+    'access arguments' => array('administer sapistats'),
+
+  );
+  $items[$pre . '/admin-log'] = array(
+    'title' => 'Admin Log',
+    'description' => 'Statistics log',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 0,
+  );
+  $items['sapistats/log'] = array(
+    'title' => 'JS Callback',
+    'page callback' => 'sapistats_js_callback',
+    'file' => 'sapistats.inc',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items[$pre . '/settings'] = array(
+    'title' => 'Settings',
+    'description' => 'Statistics Settings',
+    'page arguments' => array('sapistats_settings'),
+    'page callback' => 'drupal_get_form',
+    'file' => 'sapistats.admin.inc',
+    'access arguments' => array('administer sapistats'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -20,
+  );
+  $items[$pre . '/logsettings'] = array(
+    'title' => 'Fields',
+    'description' => 'Statistics blacklists',
+    'page arguments' => array('sapistats_choose_fields_form'),
+    'page callback' => 'drupal_get_form',
+    'file' => 'sapistats.admin.inc',
+    'access arguments' => array('administer sapistats'),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => -10,
+  );
+
+  $items[$pre . '/logsettings/choosefields'] = array(
+    'title' => 'Choose fields',
+    'description' => 'Choose Fields for logging',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+  $items[$pre . '/logsettings/blacklistsearchids'] = array(
+    'title' => 'Blacklist by Search ID',
+    'description' => 'Blacklist Search IDs',
+    'page arguments' => array('sapistats_blacklist_searchids_form'),
+    'page callback' => 'drupal_get_form',
+    'file' => 'sapistats.admin.inc',
+    'access arguments' => array('administer sapistats'),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 0,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function sapistats_permission() {
+  return array(
+    'administer sapistats' => array(
+      'title' => t('Administer Search API Statistics'),
+      'description' => t('Perform administration tasks for Search API Statistics.'),
+    ),
+    'view sapistats' => array(
+      'title' => t('View Search API Statistics'),
+      'description' => t('View Search API Statistics and Reports'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_date_api_fields().
+ */
+function sapistats_date_api_fields($field) {
+  $values = array(
+    'sql_type' => DATE_UNIX,  // The type of date: DATE_UNIX, DATE_ISO, DATE_DATETIME.
+    'tz_handling' => 'none',  // Timezone handling options: 'none', 'site', 'date', 'utc'.
+    'timezone_field' => '',   // Needed only for dates that use 'date' tz_handling.
+    'offset_field' => '',     // Needed only for dates that use 'date' tz_handling.
+    'related_fields' => array(), // Array of "table.field" values for related fields that should be loaded automatically in the Views SQL.
+    'granularity' => array('year', 'month', 'day', 'hour', 'minute', 'second'),  // Granularity of this date field's db data.
+  );
+
+  if ($field == 'sapistats.timestamp') {
+    return $values;
+  }
+}
+
+/**
+ * Implements hook_cron().
+ */
+// TODO: finish this function:
+/*function sapistats_cron() {
+  $settings = variable_get('sapistats', array());
+  db_delete('sapistats')
+  ->condition('timestamp', REQUEST_TIME - $settings['flush_log_timer'], '<')
+  ->execute();
+}
+*/
+
+/**
+ * Implements hook_views_api().
+ */
+function sapistats_views_api() {
+  return array('api' => 3.0);
+}
+
+/**
+ * Implements hook_entity_info().
+ */
+function sapistats_entity_info() {
+  $return = array();
+  $return = array(
+    'sapistat_log' => array(
+      'label' => t('Search API Statistics query'),
+      'module' => 'sapistats',
+      'base table' => 'sapistats',
+      'controller class' => 'EntityAPIController',
+      'entity keys' => array(
+        'id' => 'id',
+      ),
+      'entity class' => 'SapistatLog',
+    ),
+  );
+  return $return;
+}
+
+/**
+ * Implements hook_views_data_alter().
+ */
+function sapistats_views_data_alter(&$data) {
+  $data['sapistats']['timestamp']['filter']['handler'] = 'date_views_filter_handler';
+}
+
+/**
+ * Implements hook_entity_property_info_alter().
+ */
+function sapistats_entity_property_info_alter(&$info) {
+  $info['sapistat_log']['properties']['timestamp']['type'] = 'date';
+}
+
+/**
+ * Implements hook_search_api_query_alter().
+ *
+ * This was heavily modified by UBC WS
+ */
+function sapistats_search_api_query_alter(SearchApiQueryInterface $query) {
+  module_load_include('inc', 'sapistats', 'sapistats');
+  $opt = $query->getOptions();
+
+  if (sapistats_check_if_blacklisted_searchid($opt['search id'])) {
+    return;
+  }
+
+  $settings = variable_get('sapistats', array());
+  global $user;
+
+  $index = $query->getIndex();
+  $keys = $query->getKeys();
+  $records = array();
+  $filters = &$query->getFilter()->getFilters();
+  
+  $new_id = isset($settings['last_sid']) ? ++$settings['last_sid'] : 0;
+
+  // Write the keywords individually
+  if ($keys) {
+    for ($i = 0; $i < count($keys) - 1; $i++) {
+			if(strlen($keys[$i]) > 255) continue;
+      $record = array(
+        'id' => NULL,
+        'timestamp' => time(),
+        'sid' => $new_id,
+        'uid' => intval($user->uid),
+        'sindex' => $query->getIndex()->machine_name,
+        'type' => 'keyword',
+        'value' => $keys[$i],
+        'ip' => ip_address(),
+      );
+      $records[] = $record;
+    }
+  }
+
+  // Write the entire search term
+  if ($keys) {
+		$term = '';
+		$first = true;
+    for ($i = 0; $i < count($keys) - 1; $i++) {
+			if(!$first) {
+			  $term .= ' ';
+			} 
+			$term .= $keys[$i];
+  	  $first = false;
+    }
+			
+		if(strlen($term) < 255) {
+	    $record = array(
+	      'id' => NULL,
+	      'timestamp' => time(),
+	      'sid' => $new_id,
+	      'uid' => intval($user->uid),
+	      'sindex' => $query->getIndex()->machine_name,
+	      'type' => 'term',
+	      'value' => $term,
+	      'ip' => ip_address(),
+	    );
+	    $records[] = $record;
+		}
+  }
+
+
+ /* We will write a log entry, even if the page is loaded from cache.
+  * Even if the query was not issued directly but someone called a page,
+  * that contains results of some query.
+  */
+  if (($user->uid == 0) && (variable_get('cache', 0) == 1)) {
+    $jsoutput = json_encode($records);
+    $settings = array();
+    $settings['data'] = $records;
+    $token = sapistats_get_token($jsoutput);
+    $settings['token'] = $token;
+   
+    drupal_add_js(array('sapistats' => $settings), 'setting');
+    $js = <<<EOJ
+jQuery.post(Drupal.settings.basePath + 'sapistats/log', Drupal.settings.sapistats);
+EOJ;
+   
+    $options = array('type' => 'inline', 'scope' => 'footer');
+    drupal_add_js($js, $options);
+  }
+  else {
+    sapistats_log_entities($records);
+  }
+
+  $settings['last_sid'] = $new_id;
+  variable_set('sapistats', $settings);
+}
+
+/*
+ * This was the original function in the project
+ */
+function sapistats_search_api_query_alter_orig(SearchApiQueryInterface $query) {
+  module_load_include('inc', 'sapistats', 'sapistats');
+  $opt = $query->getOptions();
+
+  if (sapistats_check_if_blacklisted_searchid($opt['search id'])) {
+    return;
+  }
+
+  $settings = variable_get('sapistats', array());
+  global $user;
+
+  $index = $query->getIndex();
+  $keys = $query->getKeys();
+  $records = array();
+  $filters = &$query->getFilter()->getFilters();
+  
+  /* 
+	 * Get all filters in represantion filter's name => value.
+   * Merge filters got from the GET request with filters got from the query object,
+   * since the latter does not contain them all
+   */
+  //$expfilters = array_merge(sapistats_getfiltersarray($filters), sapistats_get_filters_from_url($_REQUEST));
+  $expfilters = sapistats_get_filters_from_url($_REQUEST);
+
+  // Write all filters into the table.
+  $new_id = isset($settings['last_sid']) ? ++$settings['last_sid'] : 0;
+  foreach ($expfilters as $filtername => $value) {
+    
+    if (sapistats_check_if_logged_field($filtername, $query->getIndex()->machine_name)) {
+			if(strlen($value) > 56) continue;
+      $record = array(
+        'id' => NULL,
+        'timestamp' => time(),
+        'sid' => $new_id,
+        'uid' => intval($user->uid),
+        'field' => $filtername,
+        'sindex' => $query->getIndex()->machine_name,
+        'type' => 'filter',
+        'value' => $value,
+        'ip' => ip_address(),
+      );
+      $records[] = $record;
+    }
+  }
+
+  // Write the keyword.
+  if ($keys) {
+    for ($i = 0; $i < count($keys) - 1; $i++) {
+			if(strlen($keys[$i]) > 56) continue;
+      $record = array(
+        'id' => NULL,
+        'timestamp' => time(),
+        'sid' => $new_id,
+        'uid' => intval($user->uid),
+        'sindex' => $query->getIndex()->machine_name,
+        'type' => 'keyword',
+        'value' => $keys[$i],
+        'ip' => ip_address(),
+      );
+      $records[] = $record;
+    }
+  }
+
+ /* We will write a log entry, even if the page is loaded from cache.
+  * Even if the query was not issued directly but someone called a page,
+  * that contains results of some query.
+  */
+  if (($user->uid == 0) && (variable_get('cache', 0) == 1)) {
+    $jsoutput = json_encode($records);
+    $settings = array();
+    $settings['data'] = $records;
+    $token = sapistats_get_token($jsoutput);
+    $settings['token'] = $token;
+   
+    drupal_add_js(array('sapistats' => $settings), 'setting');
+    $js = <<<EOJ
+jQuery.post(Drupal.settings.basePath + 'sapistats/log', Drupal.settings.sapistats);
+EOJ;
+   
+    $options = array('type' => 'inline', 'scope' => 'footer');
+    drupal_add_js($js, $options);
+  }
+  else {
+    sapistats_log_entities($records);
+  }
+
+  $settings['last_sid'] = $new_id;
+  variable_set('sapistats', $settings);
+}

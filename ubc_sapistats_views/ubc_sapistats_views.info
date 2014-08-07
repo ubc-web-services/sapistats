@@ -1,0 +1,12 @@
+name = UBC SapiStats Views
+description = Customized Search API Stat Generator
+core = 7.x
+package = Features
+version = 7.x-1.0
+project = ubc_sapistats_views
+dependencies[] = views
+dependencies[] = sapistats
+features[ctools][] = views:views_default:3.0
+features[features_api][] = api:1
+features[views_view][] = custom_search_api_statistics_top_keywords_chart
+features_exclude[dependencies][ctools] = ctools
